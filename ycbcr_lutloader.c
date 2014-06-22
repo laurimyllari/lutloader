@@ -1,10 +1,9 @@
 #include "lcms2.h"
 #include <math.h>
+#include <stdlib.h>
 
 // borrow some lcms2 internals - probably a bad idea?
 extern cmsToneCurve** _cmsStageGetPtrToCurveSet(const cmsStage* mpe);
-
-#define OUTPUTTABLESIZE 32
 
 int main(int  argc, char* argv[])
 {
@@ -12,7 +11,8 @@ int main(int  argc, char* argv[])
     cmsPipeline *pipeline;
     cmsStage *inputstage, *clutstage, *outputstage;
     cmsToneCurve **inputcurves, **outputcurves;
-    float outputtable[3][OUTPUTTABLESIZE];
+    float *outputtable[3];
+    int outputtablesize;
 
     if (argc != 2) {
         printf("ycbcr_lotloader <YCbCr->RGB icc device link>\n");
@@ -31,8 +31,6 @@ int main(int  argc, char* argv[])
     }
 
     pipeline = cmsReadTag(hProfile, cmsSigAToB0Tag);
-    printf("loaded conversion pipeline with %d stages\n",
-            cmsPipelineStageCount(pipeline));
 
     if (!cmsPipelineCheckAndRetreiveStages(
             pipeline,
@@ -63,6 +61,13 @@ int main(int  argc, char* argv[])
             && cmsIsToneCurveLinear(outputcurves[2]))
     {
         printf("output curves seem linear and could be ignored\n");
+        outputtablesize = 16;
+    }
+    else
+    {
+        // Use the same size as lcms2 uses for its estimated representation
+        outputtablesize = cmsGetToneCurveEstimatedTableEntries(outputcurves[0]);
+        printf("using output table size %d\n", outputtablesize);
     }
 
 #ifdef DEBUG
@@ -86,15 +91,18 @@ int main(int  argc, char* argv[])
 #endif
 
     for (int c = 0; c < 3; c++ )
-        for (int x = 0; x < OUTPUTTABLESIZE; x++)
+    {
+        outputtable[c] = malloc(outputtablesize * sizeof(float));
+        for (int x = 0; x < outputtablesize; x++)
         {
             outputtable[c][x] = cmsEvalToneCurveFloat(
                     outputcurves[c],
-                    (float)x / (OUTPUTTABLESIZE-1));
+                    (float)x / (outputtablesize-1));
         }
+    }
 
 #ifdef DEBUG
-    for (int x = 0; x < OUTPUTTABLESIZE; x++)
+    for (int x = 0; x < outputtablesize; x++)
     {
         printf("%2d: ", x);
         for (int c = 0; c < 3; c++ )
@@ -102,6 +110,11 @@ int main(int  argc, char* argv[])
         printf("\n");
     }
 #endif
+
+    for (int c = 0; c < 3; c++ )
+    {
+        free(outputtable[c]);
+    }
 
     cmsCloseProfile(hProfile);
 
