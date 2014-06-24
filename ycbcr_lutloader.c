@@ -1,33 +1,8 @@
 #include "lcms2.h"
+#include "lcms2_plugin.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
-// borrow some lcms2 internals - probably a bad idea?
-extern cmsToneCurve** _cmsStageGetPtrToCurveSet(const cmsStage* mpe);
-
-typedef struct
-{
-    cmsUInt16Number prevval[3];
-    int valcount[3];
-} countcargo_t;
-
-cmsInt32Number lutSizeCounter(register const cmsUInt16Number In[],
-        register cmsUInt16Number Out[],
-        register void * Cargo)
-{
-    countcargo_t *c = (countcargo_t*)Cargo;
-
-    for (int d = 0; d < 3; d++)
-    {
-        if (In[d] > c->prevval[d])
-        {
-            c->prevval[d] = In[d];
-            c->valcount[d]++;
-        }
-    }
-    return 1;
-}
 
 typedef struct
 {
@@ -56,7 +31,6 @@ int main(int  argc, char* argv[])
     cmsPipeline *pipeline;
     cmsStage *inputstage, *clutstage, *outputstage;
     cmsToneCurve **inputcurves, **outputcurves;
-    countcargo_t countcargo;
     int outputtablesize;
     float *outputtable[3];
     fillcargo_t fillcargo;
@@ -81,6 +55,11 @@ int main(int  argc, char* argv[])
 
     pipeline = cmsReadTag(hProfile, cmsSigAToB0Tag);
 
+    if (cmsPipelineInputChannels(pipeline) != 3 || cmsPipelineOutputChannels(pipeline) != 3) {
+        printf("expected 3 channels\n");
+        return 1;
+    }
+
     if (!cmsPipelineCheckAndRetreiveStages(
             pipeline,
             3,
@@ -91,37 +70,32 @@ int main(int  argc, char* argv[])
     }
 
     // to use YCbCr source encoding with collink, curves must be disabled
-    inputcurves = _cmsStageGetPtrToCurveSet(inputstage);
+    inputcurves = ((_cmsStageToneCurvesData *)cmsStageData(inputstage))->TheCurves;
 
     for (int c = 0; c < 3; c++ )
-        if (!cmsIsToneCurveLinear(inputcurves[c]))
-            {
+        if (!cmsIsToneCurveLinear(inputcurves[c])) {
                 printf("expected linear input table\n");
                 return 1;
-            }
+        }
 
     // It is possible that output curve has been added with applycal. This
     // gives two options for including device calibration: -a to collink
     // (calibration is applied to the 3DLUT?) or applycal. Would the latter
     // give better precision?
-    outputcurves = _cmsStageGetPtrToCurveSet(outputstage);
+    outputcurves = ((_cmsStageToneCurvesData *)cmsStageData(outputstage))->TheCurves;
     if (cmsIsToneCurveLinear(outputcurves[0])
             && cmsIsToneCurveLinear(outputcurves[1])
-            && cmsIsToneCurveLinear(outputcurves[2]))
-    {
+            && cmsIsToneCurveLinear(outputcurves[2])) {
         printf("output curves seem linear and could be ignored\n");
         outputtablesize = 16;
-    }
-    else
-    {
+    } else {
         // Use the same size as lcms2 uses for its estimated representation
         outputtablesize = cmsGetToneCurveEstimatedTableEntries(outputcurves[0]);
         printf("using output table size %d\n", outputtablesize);
     }
 
 #ifdef DEBUG
-    for (int c = 0; c < 3; c++ )
-    {
+    for (int c = 0; c < 3; c++ ) {
         printf("outputcurves[%d]:\n" \
                 "\tisMultisegment: %s\n" \
                 "\tisLinear: %s\n" \
@@ -139,11 +113,9 @@ int main(int  argc, char* argv[])
     }
 #endif
 
-    for (int c = 0; c < 3; c++ )
-    {
+    for (int c = 0; c < 3; c++ ) {
         outputtable[c] = malloc(outputtablesize * sizeof(float));
-        for (int x = 0; x < outputtablesize; x++)
-        {
+        for (int x = 0; x < outputtablesize; x++) {
             outputtable[c][x] = cmsEvalToneCurveFloat(
                     outputcurves[c],
                     (float)x / (outputtablesize-1));
@@ -151,8 +123,7 @@ int main(int  argc, char* argv[])
     }
 
 #ifdef DEBUG
-    for (int x = 0; x < outputtablesize; x++)
-    {
+    for (int x = 0; x < outputtablesize; x++) {
         printf("%2d: ", x);
         for (int c = 0; c < 3; c++ )
             printf(" %0.4f", outputtable[c][x]);
@@ -160,10 +131,9 @@ int main(int  argc, char* argv[])
     }
 #endif
 
-    // this is a little convoluted, but lcms2 doesn't give us the LUT size?
-    memset(&countcargo, 0, sizeof(countcargo_t));
-    cmsStageSampleCLut16bit(clutstage, lutSizeCounter, &countcargo, SAMPLER_INSPECT);
-    lutsize[0] = countcargo.valcount[0]; lutsize[1] = countcargo.valcount[1]; lutsize[2] = countcargo.valcount[2];
+    _cmsStageCLutData *clutdata = ((_cmsStageCLutData *)cmsStageData(clutstage));
+    lutsize[0] = lutsize[1] = lutsize[2] = round(pow(clutdata->nEntries / 3, 1.0/3));
+
     printf("lut size %dx%dx%d\n",
             lutsize[0],
             lutsize[1],
@@ -178,8 +148,7 @@ int main(int  argc, char* argv[])
 
 
 
-    for (int c = 0; c < 3; c++ )
-    {
+    for (int c = 0; c < 3; c++ ) {
         free(outputtable[c]);
     }
     free(lut);
