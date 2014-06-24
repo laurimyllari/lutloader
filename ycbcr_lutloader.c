@@ -4,27 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct
-{
-    cmsFloat32Number *lut;  // lut output data
-    int s;                  // lut size
-} fillcargo_t;
-
-cmsInt32Number lutFiller(register const cmsFloat32Number In[],
-        register cmsFloat32Number Out[],
-        register void * Cargo)
-{
-    fillcargo_t *f = (fillcargo_t*)Cargo;
-    int x = In[0] * f->s;
-    int y = In[1] * f->s;
-    int z = In[2] * f->s;
-    int index = 3 * (z*f->s + y*f->s + x);
-    f->lut[index] = Out[0];
-    f->lut[index+1] = Out[1];
-    f->lut[index+2] = Out[2];
-    return 1;
-}
-
 int main(int  argc, char* argv[])
 {
     cmsHPROFILE hProfile;
@@ -33,8 +12,7 @@ int main(int  argc, char* argv[])
     cmsToneCurve **inputcurves, **outputcurves;
     int outputtablesize;
     float *outputtable[3];
-    fillcargo_t fillcargo;
-    int lutsize;
+    int lutsize, lutsamples;
     float *lut;
 
     if (argc != 2) {
@@ -132,17 +110,25 @@ int main(int  argc, char* argv[])
 #endif
 
     _cmsStageCLutData *clutdata = ((_cmsStageCLutData *)cmsStageData(clutstage));
-    lutsize = round(pow(clutdata->nEntries / 3, 1.0/3));
+    lutsamples = clutdata->nEntries;
+    lutsize = round(pow(lutsamples / 3, 1.0/3));
 
-    printf("lut size %dx%dx%d\n",
-            lutsize, lutsize, lutsize);
+    printf("lut size %dx%dx%d, %s\n",
+            lutsize, lutsize, lutsize, clutdata->HasFloatValues ? "float" : "uint16");
 
-    lut = malloc(lutsize * lutsize * lutsize * 3 * sizeof(float));
-    fillcargo.lut = lut;
-    fillcargo.s = lutsize;
-    cmsStageSampleCLutFloat(clutstage, lutFiller, &fillcargo, SAMPLER_INSPECT);
+    if (lutsize*lutsize*lutsize*3 != lutsamples) {
+        printf("calculated LUT dimensions don't match sample count\n");
+        return 1;
+    }
 
+    lut = malloc(lutsamples * sizeof(float));
 
+    for (int i = 0; i < lutsamples; i++) {
+        if (clutdata->HasFloatValues)
+            lut[i] = clutdata->Tab.TFloat[i];
+        else
+            lut[i] = clutdata->Tab.T[i] / 65535.0F;
+    }
 
     for (int c = 0; c < 3; c++ ) {
         free(outputtable[c]);
