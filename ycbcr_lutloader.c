@@ -7,7 +7,7 @@
 typedef struct
 {
     cmsFloat32Number *lut;  // lut output data
-    int s1, s2, s3;         // lut dimensions
+    int s;                  // lut size
 } fillcargo_t;
 
 cmsInt32Number lutFiller(register const cmsFloat32Number In[],
@@ -15,10 +15,10 @@ cmsInt32Number lutFiller(register const cmsFloat32Number In[],
         register void * Cargo)
 {
     fillcargo_t *f = (fillcargo_t*)Cargo;
-    int x = In[0] * f->s1;
-    int y = In[1] * f->s2;
-    int z = In[2] * f->s3;
-    int index = 3 * (z*f->s2 + y*f->s1 + x);
+    int x = In[0] * f->s;
+    int y = In[1] * f->s;
+    int z = In[2] * f->s;
+    int index = 3 * (z*f->s + y*f->s + x);
     f->lut[index] = Out[0];
     f->lut[index+1] = Out[1];
     f->lut[index+2] = Out[2];
@@ -34,7 +34,7 @@ int main(int  argc, char* argv[])
     int outputtablesize;
     float *outputtable[3];
     fillcargo_t fillcargo;
-    int lutsize[3];
+    int lutsize;
     float *lut;
 
     if (argc != 2) {
@@ -132,18 +132,14 @@ int main(int  argc, char* argv[])
 #endif
 
     _cmsStageCLutData *clutdata = ((_cmsStageCLutData *)cmsStageData(clutstage));
-    lutsize[0] = lutsize[1] = lutsize[2] = round(pow(clutdata->nEntries / 3, 1.0/3));
+    lutsize = round(pow(clutdata->nEntries / 3, 1.0/3));
 
     printf("lut size %dx%dx%d\n",
-            lutsize[0],
-            lutsize[1],
-            lutsize[2]);
+            lutsize, lutsize, lutsize);
 
-    lut = malloc(lutsize[0] * lutsize[1] * lutsize[2] * 3 * sizeof(float));
+    lut = malloc(lutsize * lutsize * lutsize * 3 * sizeof(float));
     fillcargo.lut = lut;
-    fillcargo.s1 = lutsize[0];
-    fillcargo.s2 = lutsize[1];
-    fillcargo.s3 = lutsize[2];
+    fillcargo.s = lutsize;
     cmsStageSampleCLutFloat(clutstage, lutFiller, &fillcargo, SAMPLER_INSPECT);
 
 
